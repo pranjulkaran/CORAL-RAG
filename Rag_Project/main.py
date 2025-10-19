@@ -2,10 +2,17 @@ import argparse
 import asyncio
 import sys
 import os
+import traceback
+import rich
 
+# --- Real Imports from Project Structure ---
+# These must exist in separate files for the application to run.
 from vector_db_factory import get_vector_db
 from ingest_pipeline import IngestPipeline
 from rag_agentic import AgenticRAG
+
+# Initialize Rich console for clean output
+console = rich.get_console()
 
 
 # Function to wrap the async call for use in synchronous main()
@@ -15,6 +22,7 @@ async def run_indexing(idx, documents):
 
 
 def main():
+    """Main function to parse arguments and execute the RAG system modes."""
     parser = argparse.ArgumentParser(
         description="A Command-Line Interface for the Agentic RAG System.",
         formatter_class=argparse.RawTextHelpFormatter
@@ -38,10 +46,6 @@ def main():
         "--query",
         help="The question or text query (required for 'query' mode)."
     )
-
-    # NOTE: The --top_k argument has been removed because the retrieval and
-    # re-ranking logic is now controlled internally by the AgenticRAG class
-    # using 'top_k_retrieve' and 'top_n_rank'.
 
     args = parser.parse_args()
 
@@ -71,8 +75,14 @@ def main():
         print(f"🚀 Starting indexing pipeline for folder: {args.folder}")
         try:
             idx = IngestPipeline()
+
+            # CRITICAL UPDATE: Call cleanup_deleted_files, passing the required folder path
+            idx.cleanup_deleted_files(args.folder)
+
+            # 2. Parse documents and check for changes
             documents = idx.parse_docs(args.folder)
 
+            # 3. Index new documents
             if documents:
                 # Correctly run the async indexing function
                 asyncio.run(run_indexing(idx, documents))
@@ -82,6 +92,7 @@ def main():
 
         except Exception as e:
             print(f"❌ An error occurred during indexing: {e}")
+            traceback.print_exc()
             sys.exit(1)
 
     # --- Mode: QUERY ---
@@ -95,9 +106,10 @@ def main():
         try:
             rag = AgenticRAG()
 
-            # CRITICAL FIX: Do not pass top_k to the query method
+            # The AgenticRAG object handles retrieval, re-ranking, and LLM generation
             res = rag.query(args.query)
 
+            # Display formatted output
             print("\n" + "=" * 50)
             print("🤖 Answer:")
             print(res["answer"])
@@ -107,11 +119,12 @@ def main():
             unique_sources = set(res["sources"])
             if unique_sources:
                 for src in unique_sources:
-                    print(f"- {os.path.basename(src)}")  # Print just the filename for cleaner output
+                    # Print just the filename for cleaner output
+                    print(f"- {os.path.basename(src)}")
             else:
                 print("- None (Answer may be based on common LLM knowledge or context was empty.)")
 
-            print("\n🔍 Context Chunks (Top 5 Re-Ranked):")
+            print("\n🔍 Context Chunks (Top Re-Ranked):")
             for i, chunk in enumerate(res["context_chunks"]):
                 # Simple display of the actual chunks used
                 print(f"--- Chunk {i + 1} ---")
@@ -119,11 +132,9 @@ def main():
 
             print("--------------------------------------------------")
 
-
         except Exception as e:
             print(f"❌ An error occurred during query: {e}")
             # print the traceback for easier debugging if a new error occurs
-            import traceback
             traceback.print_exc()
             sys.exit(1)
 

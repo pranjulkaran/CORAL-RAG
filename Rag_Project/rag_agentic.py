@@ -3,8 +3,9 @@ import re
 import chromadb
 import ollama
 import asyncio
+# Assuming these imports are available in the project environment
 from vector_db_factory import get_vector_db
-from rag_embedder import OllamaBatchEmbedder  # Assumes this class name is correct
+from rag_embedder import OllamaBatchEmbedder
 
 
 class AgenticRAG:
@@ -19,15 +20,18 @@ class AgenticRAG:
         self.collection = get_vector_db()
 
         # Initialize the Ollama embedder for generating query vectors (1024-dim)
+        # We need to create a new instance here to avoid circular dependency issues
+        # if the embedder was imported globally in this structure.
         self.embedder = OllamaBatchEmbedder()
 
         # LLM to be used for final answer generation
-        # FIXED to use the installed model 'llama3.2:latest'
         self.model = "llama3.2:latest"
 
         # Configuration for Two-Stage Retrieval
-        self.top_k_retrieve = 15  # Stage 1: Initial number of candidates retrieved from Vector DB
-        self.top_n_rank = 5  # Stage 2: Final number of best chunks passed to the LLM (Re-Ranked subset)
+        # Stage 1: Initial number of candidates retrieved from Vector DB
+        self.top_k_retrieve = 15
+        # Stage 2: Final number of best chunks passed to the LLM (Re-Ranked subset)
+        self.top_n_rank = 5
 
     def _rerank(self, query: str, results: dict):
         """
@@ -37,6 +41,7 @@ class AgenticRAG:
         """
 
         # ChromaDB query results are lists nested inside another list (e.g., [[]])
+        # We assume the results are already sorted by distance (similarity)
         documents = results["documents"][0]
         metadata = results["metadatas"][0]
         distances = results["distances"][0]
@@ -55,17 +60,19 @@ class AgenticRAG:
         """
 
         # 1. Generate the 1024-dimension query vector using the Ollama embedder
+        # Note: embed_batch is used for consistency, even with a single query
         query_embedding_list = await self.embedder.embed_batch([query])
         query_embedding = query_embedding_list[0]
 
         # 2. Query the vector store for a large number of candidate chunks (Stage 1)
         results = self.collection.query(
-            query_embeddings=[query_embedding],  # CRITICAL: Use query_embeddings with the Ollama vector
+            query_embeddings=[query_embedding],  # Use the Ollama vector
             n_results=self.top_k_retrieve,  # Retrieve the larger candidate set
             include=['documents', 'metadatas', 'distances']
         )
 
         if not results.get("documents") or not results["documents"][0]:
+            # No results found
             return "", [], []
 
         # 3. Apply Re-Ranking/Filtering to get the best N chunks (Stage 2)
@@ -76,24 +83,24 @@ class AgenticRAG:
         for doc in documents:
             normalized_doc = doc
 
-            # 1. Fix CamelCase/Run-on Words: lowercase followed by uppercase letter (e.g., "ofthemBuiltup")
-            # This handles cases like: Congratulations!We -> Congratulations! We
+            # 1. Fix CamelCase/Run-on Words
             normalized_doc = re.sub(r'([a-z])([A-Z])', r'\1 \2', normalized_doc)
 
-            # 2. Fix Punctuation Run-ons (e.g., "app.There", "covered:1.Wethink")
-            # This inserts a space after a common punctuation mark or colon followed by a letter/digit
+            # 2. Fix Punctuation Run-ons
             normalized_doc = re.sub(r'([\.?!,:;])([a-zA-Z0-9])', r'\1 \2', normalized_doc)
 
-            # 3. Fix Digit Run-ons (e.g., "Application61Congratulations")
-            # This specifically targets a letter followed by a digit and separates them.
+            # 3. Fix Digit Run-ons (Letter followed by digit)
             normalized_doc = re.sub(r'([a-zA-Z])([0-9])', r'\1 \2', normalized_doc)
+
+            # 4. Fix Digit Run-ons (Digit followed by letter)
+            normalized_doc = re.sub(r'([0-9])([a-zA-Z])', r'\1 \2', normalized_doc)
 
             normalized_documents.append(normalized_doc)
 
         # Create context string from re-ranked and normalized documents
         context = "\n\n---\n\n".join(normalized_documents)
 
-        # 4. Return the normalized documents list for 'context_chunks'
+        # 4. Return the context string, metadata, and the list of normalized documents
         return context, metadata, normalized_documents
 
     def generate(self, query: str, context: str, chat_history: list):
@@ -103,7 +110,7 @@ class AgenticRAG:
         # Format the conversational history for the LLM prompt
         history_str = "\n".join([f"{h['speaker']}: {h['message']}" for h in chat_history])
 
-        # 🚨 FINALIZED SYSTEM PROMPT: Stronger directive and explicit instruction to avoid hedging. 🚨
+        # FINALIZED SYSTEM PROMPT: Strong directive for grounded generation
         system_prompt = (
             "You are a helpful assistant. Use the provided CONTEXT to formulate your answer. "
             "If the context contains information that directly or indirectly answers the question, summarize and state it clearly. "
@@ -112,12 +119,11 @@ class AgenticRAG:
             "Always include source citations at the end of your answer."
         )
 
-        # 🚨 FIXED USER MESSAGE: The hardcoded Redux line has been removed. 🚨
+        # User message combining history, context, and the new query
         user_message_content = (
             f"HISTORICAL CONVERSATION:\n{history_str}\n\n"
             f"NEW CONTEXT (Use this for your answer, this context has been pre-filtered for relevance):\n{context}\n\n"
             f"QUESTION: {query}\n\n"
-            # This line was the source of the error. It now asks the LLM to answer the actual question.
             f"Please answer the QUESTION based ONLY on the provided CONTEXT."
         )
 
@@ -129,7 +135,7 @@ class AgenticRAG:
         response = ollama.chat(
             model=self.model,
             messages=messages,
-            # INCREASED num_predict for longer answers and slightly higher temperature for more detail
+            # Options for detailed and long response
             options={"temperature": 0.7, "num_ctx": 8000, "num_predict": 4000}
         )
 
@@ -143,6 +149,7 @@ class AgenticRAG:
 
         # Use asyncio.run to execute the async retrieval function
         try:
+            # We call the async method from the sync context
             context, metadata, documents = asyncio.run(self.retrieve(question))
         except Exception as e:
             # Handle retrieval errors gracefully
@@ -154,6 +161,7 @@ class AgenticRAG:
             return {"answer": "I could not find any relevant documents in the database to answer your question.",
                     "sources": [], "context_chunks": []}
 
+        # Generate the final answer
         answer = self.generate(question, context, chat_history)
 
         # Extract unique source names (file paths)

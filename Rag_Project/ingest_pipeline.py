@@ -60,7 +60,7 @@ class IngestPipeline:
         return docs
 
     async def index_docs(self, docs):
-        splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=60)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=60)
         chunks = []
         metadatas = []
         for d in docs:

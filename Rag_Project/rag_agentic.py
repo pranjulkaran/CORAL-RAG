@@ -1,3 +1,6 @@
+import os
+import re
+import chromadb
 import ollama
 import asyncio
 from vector_db_factory import get_vector_db
@@ -68,9 +71,30 @@ class AgenticRAG:
         # 3. Apply Re-Ranking/Filtering to get the best N chunks (Stage 2)
         documents, metadata, _ = self._rerank(query, results)
 
-        # Create context string from re-ranked documents
-        context = "\n\n---\n\n".join(documents)
-        return context, metadata, documents
+        # --- Whitespace Normalization (ENHANCED LOGIC) ---
+        normalized_documents = []
+        for doc in documents:
+            normalized_doc = doc
+
+            # 1. Fix CamelCase/Run-on Words: lowercase followed by uppercase letter (e.g., "ofthemBuiltup")
+            # This handles cases like: Congratulations!We -> Congratulations! We
+            normalized_doc = re.sub(r'([a-z])([A-Z])', r'\1 \2', normalized_doc)
+
+            # 2. Fix Punctuation Run-ons (e.g., "app.There", "covered:1.Wethink")
+            # This inserts a space after a common punctuation mark or colon followed by a letter/digit
+            normalized_doc = re.sub(r'([\.?!,:;])([a-zA-Z0-9])', r'\1 \2', normalized_doc)
+
+            # 3. Fix Digit Run-ons (e.g., "Application61Congratulations")
+            # This specifically targets a letter followed by a digit and separates them.
+            normalized_doc = re.sub(r'([a-zA-Z])([0-9])', r'\1 \2', normalized_doc)
+
+            normalized_documents.append(normalized_doc)
+
+        # Create context string from re-ranked and normalized documents
+        context = "\n\n---\n\n".join(normalized_documents)
+
+        # 4. Return the normalized documents list for 'context_chunks'
+        return context, metadata, normalized_documents
 
     def generate(self, query: str, context: str, chat_history: list):
         """
@@ -88,12 +112,13 @@ class AgenticRAG:
             "Always include source citations at the end of your answer."
         )
 
-        # 🚨 FINALIZED USER MESSAGE: Guiding the LLM to look for specific components. 🚨
+        # 🚨 FIXED USER MESSAGE: The hardcoded Redux line has been removed. 🚨
         user_message_content = (
             f"HISTORICAL CONVERSATION:\n{history_str}\n\n"
             f"NEW CONTEXT (Use this for your answer, this context has been pre-filtered for relevance):\n{context}\n\n"
             f"QUESTION: {query}\n\n"
-            f"Please identify the main components or methods of the Redux store object from the CONTEXT and list them as the answer."
+            # This line was the source of the error. It now asks the LLM to answer the actual question.
+            f"Please answer the QUESTION based ONLY on the provided CONTEXT."
         )
 
         messages = [
@@ -104,7 +129,8 @@ class AgenticRAG:
         response = ollama.chat(
             model=self.model,
             messages=messages,
-            options={"temperature": 0.6, "num_ctx": 8000}
+            # INCREASED num_predict for longer answers and slightly higher temperature for more detail
+            options={"temperature": 0.7, "num_ctx": 8000, "num_predict": 4000}
         )
 
         return response["message"]["content"]
@@ -133,5 +159,5 @@ class AgenticRAG:
         # Extract unique source names (file paths)
         unique_sources = list(set(md.get("source", "Unknown Source") for md in metadata))
 
-        # The documents list here only contains the final, re-ranked chunks (top_n_rank)
+        # The documents list here only contains the final, re-ranked and normalized chunks
         return {"answer": answer, "sources": unique_sources, "context_chunks": documents}

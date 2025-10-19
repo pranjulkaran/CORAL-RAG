@@ -1,0 +1,12 @@
+streamlit
+ollama
+langchain
+langchain-community
+chromadb
+watchdog
+unstructured[md]
+pypdf
+tiktoken
+psutil
+rich
+python-dotenv

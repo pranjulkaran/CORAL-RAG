@@ -21,7 +21,7 @@ Use the `main.py` script with the `--mode index` flag to process a specific fold
 
 ```
 # Example: Indexing a source folder
-python main.py --mode index --folder "D:\obsidian notes\Note\Source materials\Business analysis"
+python main.py --mode index --folder "D:\obsidian notes\....."
 ```
 
 ### 2. Launching the Chat Interface
@@ -31,13 +31,3 @@ Start the Streamlit application to begin chatting with your indexed knowledge ba
 ```
 streamlit run app.py
 ```
-
-## 🔗 Project Architecture Backlinks
-
-|   |   |   |
-|---|---|---|
-|**File**|**Description**|**Focus**|
-|[**`ingestion_pipeline.py`**](https://www.google.com/search?q=ingestion_pipeline.py "null")|The core logic for file parsing, chunking, and the **advanced efficiency mechanisms** (Hash/Mtime check, Move Detection, Scoped Cleanup).|Efficiency & Stability|
-|[**`rag_embedder.py`**](https://www.google.com/search?q=rag_embedder.py "null")|Handles the asynchronous, batched API calls to the local Ollama embedding service (`mxbai-embed-large`).|API Communication|
-|[**`vector_db_factory.py`**](https://www.google.com/search?q=vector_db_factory.py "null")|Initialization and connection logic for the ChromaDB vector store.|Persistence Layer|
-|[**`main.py`**](https://www.google.com/search?q=main.py "null")|Entry point for command-line operations (index mode).|Application Entry|

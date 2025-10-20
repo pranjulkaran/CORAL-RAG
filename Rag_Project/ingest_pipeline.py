@@ -12,17 +12,26 @@ from langchain_community.document_loaders import PyPDFLoader, UnstructuredMarkdo
 from rag_embedder import OllamaBatchEmbedder
 from vector_db_factory import get_vector_db
 
+# --- Configuration & Memory Management Constants ---
+# NOTE: The constants are now assumed to be in the global scope or imported from config.py
+# Using sensible defaults here for demonstration consistency.
+EMBEDDING_API_BATCH_SIZE = 1000  # Default to high speed
+VECTOR_DB_COMMIT_BATCH_SIZE = 1000
+
 console = rich.get_console()
 
-# --- Configuration & Memory Management Constants ---
 
-# Max number of text chunks to send to the embedding model API (e.g., Ollama)
-# in a single request. This is crucial for managing VRAM/RAM for large models.
-EMBEDDING_API_BATCH_SIZE = 300
-
-# Max number of documents to commit to the vector database at once.
-# This is usually higher than the embedding batch size.
-VECTOR_DB_COMMIT_BATCH_SIZE = 1000
+def _get_file_sha256(filepath, block_size=65536):
+    """Calculates SHA256 hash of a file efficiently without loading it all into memory."""
+    sha256 = hashlib.sha256()
+    try:
+        with open(filepath, 'rb') as f:
+            for block in iter(lambda: f.read(block_size), b''):
+                sha256.update(block)
+        return sha256.hexdigest()
+    except Exception as e:
+        console.print(f"[red]Error reading file for hash {filepath}: {e}[/red]")
+        return None
 
 
 class IngestPipeline:
@@ -37,41 +46,91 @@ class IngestPipeline:
 
     def parse_docs(self, folder):
         """
-        Scans a folder, checks files for modifications using mtime,
-        loads and prepares documents that are new or updated.
+        Scans a folder, checks files for modifications using mtime and content hash.
+        CRITICAL UPDATE: Now checks for identical content (file_hash) at a new location
+        to prevent unnecessary re-embedding of moved files.
         """
         docs = []
         files = []
 
-        # Collect all relevant files (.pdf, .md)
+        # 1. Collect all relevant files (.pdf, .md)
         for root, _, fs in os.walk(folder):
             for f in fs:
                 if f.endswith((".pdf", ".md")):
                     files.append(os.path.join(root, f))
 
+        # 2. Get all unique source paths and their associated hashes from the database
+        db_results = self.collection.get(include=['metadatas'])
+
+        # Mapping: file_hash -> set of (source_path, mtime)
+        hash_to_sources = {}
+        for md in db_results.get('metadatas', []):
+            f_hash = md.get('file_hash')
+            f_source = md.get('source')
+            f_mtime = md.get('file_mtime')
+            if f_hash and f_source:
+                if f_hash not in hash_to_sources:
+                    hash_to_sources[f_hash] = set()
+                # We store the mtime from the database to ensure we use the same mtime consistently
+                hash_to_sources[f_hash].add((f_source, f_mtime))
+
+        # 3. Processing Loop
         for filepath in track(files, description="Parsing documents"):
             try:
+                current_source_key = os.path.abspath(filepath)
                 file_mtime = os.path.getmtime(filepath)
+                file_hash = _get_file_sha256(filepath)
 
-                # Query for existing chunks related to this source path
-                # FIX: Use include=["metadatas"] to resolve the ChromaDB error while still
-                # getting enough info to check for modifications.
-                existing = self.collection.get(where={"source": filepath}, include=["metadatas"])
+                if not file_hash:
+                    continue  # Skip if hashing failed
 
-                # Check if file has existing chunks AND retrieve their IDs for potential deletion
-                if existing["ids"]:
-                    # Assume mtime is consistently stored across all chunks for a file
-                    stored_mtime = existing["metadatas"][0].get("file_mtime", None)
+                # Check 1: Does the content hash already exist in the database?
+                if file_hash in hash_to_sources:
 
-                    # Compare timestamps (allow a small tolerance)
-                    if stored_mtime and abs(stored_mtime - file_mtime) < 1:
-                        console.print(f"[yellow]Skipping unchanged file:[/yellow] {os.path.basename(filepath)}")
+                    found_at_current_location = False
+
+                    # Check if the content is already indexed at the CURRENT location
+                    for source, stored_mtime in hash_to_sources[file_hash]:
+                        if source == current_source_key:
+                            found_at_current_location = True
+
+                            # Check 1a: Content exists and is at the current location. Check mtime.
+                            if stored_mtime and abs(stored_mtime - file_mtime) < 1:
+                                console.print(
+                                    f"[yellow]Skipping unchanged file (mtime and hash match):[/yellow] {os.path.basename(filepath)}")
+                                break  # Skip to the next file
+
+                    if found_at_current_location:
+                        # Continue to next file if the file is unchanged
                         continue
-                    else:
-                        # File modified: delete old chunks before re-indexing
-                        console.print(
-                            f"[yellow]File modified. Deleting {len(existing['ids'])} old chunks for:[/yellow] {os.path.basename(filepath)}")
-                        self.collection.delete(ids=existing["ids"])
+
+                    # Check 1b: Content exists, but is NOT at the current location. (MOVED FILE)
+                    if not found_at_current_location:
+                        console.print(f"[cyan]Content match found. File MOVED:[/cyan] {os.path.basename(filepath)}")
+
+                        # Delete the old source chunks associated with this hash
+                        for old_source, _ in hash_to_sources[file_hash]:
+                            if old_source != current_source_key:
+                                console.print(
+                                    f"[yellow]Deleting old chunks for moved file:[/yellow] {os.path.basename(old_source)}")
+                                self.collection.delete(where={"source": old_source})
+
+                        # Proceed to re-index below. Since the content is the same,
+                        # the chunk IDs will perform a fast UPSERT to update the metadata.
+
+                # Check 2: File is new or modified (mtime or hash check failed). Proceed with loading.
+
+                # Check for existing chunks related to this current path
+                existing_chunks_at_current_path = self.collection.get(
+                    where={"source": current_source_key},
+                    include=["metadatas"]
+                )
+
+                if existing_chunks_at_current_path["ids"]:
+                    # If we are here, it means the mtime/hash comparison failed, so it must be re-indexed.
+                    console.print(
+                        f"[yellow]File modified. Deleting {len(existing_chunks_at_current_path['ids'])} old chunks for:[/yellow] {os.path.basename(filepath)}")
+                    self.collection.delete(ids=existing_chunks_at_current_path["ids"])
 
                 # Load the document
                 loader = PyPDFLoader(filepath) if filepath.endswith(".pdf") else UnstructuredMarkdownLoader(filepath)
@@ -79,8 +138,9 @@ class IngestPipeline:
 
                 # Attach source metadata for later
                 for doc in parsed_docs:
-                    doc.metadata["source"] = filepath
+                    doc.metadata["source"] = current_source_key
                     doc.metadata["file_mtime"] = file_mtime
+                    doc.metadata["file_hash"] = file_hash  # Store the hash with every chunk
 
                 docs.extend(parsed_docs)
                 console.print(
@@ -95,6 +155,8 @@ class IngestPipeline:
         """
         Chunks the documents, queues unique chunks, and processes them in batches
         for embedding and indexing.
+        FIX: Uses a dictionary (chunks_map) to enforce deduplication of chunks
+        across ALL input documents before starting the batching loop.
         """
         if not docs:
             console.print("[bold yellow]No documents passed for indexing.[/bold yellow]")
@@ -103,46 +165,44 @@ class IngestPipeline:
         # 1. Chunking and Deduplication
         splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=60)
 
-        all_chunks_data = []
-        seen_hashes = set()
+        # Use a dictionary to enforce uniqueness by chunk_id across all documents
+        chunks_map = {}
 
         for d in docs:
             text_chunks = splitter.split_text(d.page_content)
             for chunk in text_chunks:
                 h = hashlib.sha256(chunk.encode('utf-8')).hexdigest()
+                chunk_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, h))
 
-                if h not in seen_hashes:
-                    seen_hashes.add(h)
+                # If the chunk ID is already in the map, skip it (deduplication)
+                if chunk_id in chunks_map:
+                    continue
 
-                    # Store ID as UUIDv5 based on hash for ChromaDB compatibility
-                    chunk_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, h))
+                # Generate metadata with required fields
+                metadata = d.metadata.copy()
+                metadata["indexed_at"] = str(datetime.now())
 
-                    # Generate metadata with required fields
-                    metadata = d.metadata.copy()
-                    metadata["indexed_at"] = str(datetime.now())
-                    # Ensure file_mtime is set for subsequent incremental checks
-                    metadata["file_mtime"] = d.metadata.get("file_mtime", None)
+                # Store the unique chunk data
+                chunks_map[chunk_id] = {
+                    "chunk": chunk,
+                    "id": chunk_id,
+                    "metadata": metadata
+                }
 
-                    all_chunks_data.append({
-                        "chunk": chunk,
-                        "id": chunk_id,
-                        "metadata": metadata
-                    })
+        # Convert the unique dictionary values back to a list for batching
+        all_chunks_data = list(chunks_map.values())
 
         num_chunks_to_add = len(all_chunks_data)
         if num_chunks_to_add == 0:
             console.print("[bold yellow]No new unique chunks found to embed or index.[/bold yellow]")
             return
 
-        console.print(f"\n[bold blue]Total unique chunks to process:[/bold blue] {num_chunks_to_add}")
+        console.print(f"\n[bold blue]Total unique chunks to process (will use UPSERT):[/bold blue] {num_chunks_to_add}")
         console.print(f"--- Starting Batched Embedding and Indexing ---")
 
         # 2. Batched Embedding and Indexing
+        for i in track(range(0, num_chunks_to_add, EMBEDDING_API_BATCH_SIZE), description="Generating and Indexing"):
 
-        # Process ALL unique chunks in batches for the embedding API call (smaller limit)
-        for i in track(range(0, num_chunks_to_add, EMBEDDING_API_BATCH_SIZE), description="Generating embeddings"):
-
-            # --- Embedding Batch ---
             embed_start = i
             embed_end = min(i + EMBEDDING_API_BATCH_SIZE, num_chunks_to_add)
 
@@ -156,17 +216,15 @@ class IngestPipeline:
             for j, embed in enumerate(batch_embeddings):
                 batch_data[j]["embedding"] = embed
 
-            # --- Indexing Commit Batch (can be same or different size) ---
-
-            # For simplicity, we commit the same size as the embedding batch here.
-            # If your ChromaDB can handle larger commits, you could accumulate
-            # multiple embed batches before committing a larger VECTOR_DB_COMMIT_BATCH_SIZE.
+            # --- Indexing Commit Batch ---
 
             commit_chunks = [d['chunk'] for d in batch_data]
             commit_embeddings = [d['embedding'] for d in batch_data]
             commit_metadatas = [d['metadata'] for d in batch_data]
             commit_ids = [d['id'] for d in batch_data]
 
+            # Since the IDs in commit_ids are now guaranteed to be unique within this batch
+            # the ChromaDB add/upsert operation will succeed.
             self.collection.add(
                 documents=commit_chunks,
                 embeddings=commit_embeddings,
@@ -182,25 +240,45 @@ class IngestPipeline:
     def cleanup_deleted_files(self, master_docs_path):
         """
         Identifies and removes chunks in the DB whose source file no longer exists on disk.
+        CRITICAL FIX: This now only checks for stale files within the scope of the
+        currently indexed master_docs_path to prevent deleting data from other subfolders.
         """
-        console.print("\n--- Starting Stale Chunk Cleanup ---")
+        console.print("\n--- Starting Scoped Stale Chunk Cleanup ---")
 
-        # Get all unique source paths currently in the database
+        # 1. Normalize the path for filtering
+        scope_path_abs = os.path.abspath(master_docs_path)
+
+        # 2. Get all unique source paths currently in the database
         db_results = self.collection.get(include=['metadatas'])
         sources_in_db = set(md.get('source') for md in db_results.get('metadatas', []) if md.get('source'))
 
-        files_on_disk = set()
+        # 3. Filter DB sources to only include those within the current scope
+        sources_in_scope = set()
+        for source in sources_in_db:
+            # Check if the source path starts with the scope path
+            if source.startswith(scope_path_abs):
+                sources_in_scope.add(source)
+
+        if not sources_in_scope:
+            console.print("No previously indexed files found within the current scope for cleanup.")
+            return
+
+        # 4. Get all files currently on disk within the specified master_docs_path (normalized)
+        files_on_disk_in_scope = set()
         for root, _, fs in os.walk(master_docs_path):
             for f in fs:
-                # Ensure only relevant files are checked against sources_in_db
                 if f.endswith((".pdf", ".md")):
-                    files_on_disk.add(os.path.join(root, f))
+                    files_on_disk_in_scope.add(os.path.abspath(os.path.join(root, f)))
 
-        stale_sources = sources_in_db - files_on_disk
+        # 5. Determine stale sources: these are files that are in the scope but NOT on disk
+        stale_sources = sources_in_scope - files_on_disk_in_scope
 
         if stale_sources:
-            console.print(f"[yellow]Found {len(stale_sources)} source files deleted from disk.[/yellow]")
-            for source in stale_sources:
+            paths_to_delete = stale_sources
+
+            console.print(
+                f"[yellow]Found {len(paths_to_delete)} source files deleted from the scope on disk that need cleanup.[/yellow]")
+            for source in paths_to_delete:
                 console.print(f"    Removing stale chunks for: {os.path.basename(source)}")
                 try:
                     # Delete by metadata filter

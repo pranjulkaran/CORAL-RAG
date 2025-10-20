@@ -6,11 +6,11 @@ This project implements a highly efficient and robust Retrieval-Augmented Genera
 
 - **State-of-the-Art (SOTA) Retrieval:** Uses the **`mxbai-embed-large`** model for embedding, which is recognized for providing superior semantic search accuracy, ensuring the AI retrieves the most relevant context from your top-tier PDFs and notes.
     
-- **High-Speed Indexing:** Implements batched processing (1000 chunks per API call) for massively reduced ingestion time.
+- **High-Speed Indexing:** Implements batched processing (1000 chunks per API call) for massively reduced indexing time.
     
 - **Intelligent Incremental Updates:** Documents are checked via **Mtime** and **Content Hash**. If a document is merely moved or renamed, the system performs a fast metadata **UPSERT** instead of an expensive, full re-embedding.
     
-- **Safe Multi-Folder Management:** Uses **Scoped Cleanup** to safely index documents from separate folders without accidentally deleting data from other indexed paths.
+- **Safe Multi-Folder Management:** Uses **Scoped Cleanup** to safely index documents from separate folders (`--folder "PathA"`, `--folder "PathB"`) without accidentally deleting data from other indexed paths.
     
 
 ## 🛠️ Usage and Setup
@@ -22,7 +22,6 @@ Use the `main.py` script with the `--mode index` flag to process a specific fold
 ```
 # Example: Indexing a source folder
 python main.py --mode index --folder "D:\obsidian notes\Note\Source materials\Business analysis"
-
 ```
 
 ### 2. Launching the Chat Interface
@@ -31,16 +30,14 @@ Start the Streamlit application to begin chatting with your indexed knowledge ba
 
 ```
 streamlit run app.py
-
 ```
 
-## 📚 Comprehensive Project Documentation
-
-The core details and instructions are now available in the following linked documents:
+## 🔗 Project Architecture Backlinks
 
 |   |   |   |
 |---|---|---|
-|**Document**|**Focus**|**Key Content**|
-|[**`user_manual.md`**](https://www.google.com/search?q=user_manual.md "null")|**End-User Operations**|Full setup guide, how to run indexing and querying, and a guide to the web application features.|
-|[**`developer_guide.md`**](https://www.google.com/search?q=developer_guide.md "null")|**Technical Deep Dive**|File-by-file responsibilities, debugging tips, and instructions on how to swap the LLM, embedder, or chunking strategy.|
-|[**`architecture.md`**](https://gemini.google.com/app/architecture.md "null")|**Conceptual Design**|Detailed breakdown of the three layers (Ingestion, Storage, Generation) and the data flow between them.|
+|**File**|**Description**|**Focus**|
+|[**`ingestion_pipeline.py`**](https://www.google.com/search?q=ingestion_pipeline.py "null")|The core logic for file parsing, chunking, and the **advanced efficiency mechanisms** (Hash/Mtime check, Move Detection, Scoped Cleanup).|Efficiency & Stability|
+|[**`rag_embedder.py`**](https://www.google.com/search?q=rag_embedder.py "null")|Handles the asynchronous, batched API calls to the local Ollama embedding service (`mxbai-embed-large`).|API Communication|
+|[**`vector_db_factory.py`**](https://www.google.com/search?q=vector_db_factory.py "null")|Initialization and connection logic for the ChromaDB vector store.|Persistence Layer|
+|[**`main.py`**](https://www.google.com/search?q=main.py "null")|Entry point for command-line operations (index mode).|Application Entry|

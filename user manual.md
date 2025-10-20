@@ -59,6 +59,16 @@ Use this command to completely and permanently delete **all** documents from the
 |**Command**|**Purpose**|
 |**`python main.py --mode wipe`**|Clears the database. **You must type 'yes' to confirm deletion.**|
 
+### 2.4. 🔎 app Mode (RUN command)
+
+Run a direct run command using main
+
+|   |   |
+|---|---|
+|**Command**|**Purpose**|
+|**`python main.py --mode app `**|Executes the full RAG pipeline (embed query, retrieve, re-rank, generate answer using the app.py streamlit ui local host).|
+
+
 ## 3. Conversational Interface (Using `app.py`)
 
 The Streamlit application provides a user-friendly, persistent, and feature-rich interface for interacting with your RAG system.
@@ -80,4 +90,5 @@ Launch the web interface using the following command:
 |**Context Display**|Click the **"View Re-Ranked Chunks"** expander under the Bot's answer.|View the exact document chunks and filenames used to formulate the response.|
 |**Source Citation**|Sources are displayed as **"Cited Sources"** badges.|Provides verifiable document names for the information retrieved.|
 |**Start New Chat**|Click the **"Start New Chat"** button in the sidebar.|Clears the history so the LLM doesn't incorrectly use old context in a new conversation.|
+
 |**Parameters**|View the sidebar for settings like **`top_k_retrieve`** and **`top_n_rank`**.|Gives transparency into the RAG agent's retrieval configuration.|

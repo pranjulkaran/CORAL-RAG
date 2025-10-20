@@ -4,9 +4,11 @@ import asyncio
 from datetime import datetime
 import uuid
 import rich
+import json  # CRITICAL: Needed for metadata sanitization
 from rich.progress import track
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredMarkdownLoader
+# Changed to use UnstructuredPDFLoader for better handling of complex PDF layouts
+from langchain_community.document_loaders import UnstructuredPDFLoader, UnstructuredMarkdownLoader
 
 # External dependencies (assumed to be available in the project structure)
 from rag_embedder import OllamaBatchEmbedder
@@ -14,7 +16,6 @@ from vector_db_factory import get_vector_db
 
 # --- Configuration & Memory Management Constants ---
 # NOTE: The constants are now assumed to be in the global scope or imported from config.py
-# Using sensible defaults here for demonstration consistency.
 EMBEDDING_API_BATCH_SIZE = 1000  # Default to high speed
 VECTOR_DB_COMMIT_BATCH_SIZE = 1000
 
@@ -133,8 +134,19 @@ class IngestPipeline:
                     self.collection.delete(ids=existing_chunks_at_current_path["ids"])
 
                 # Load the document
-                loader = PyPDFLoader(filepath) if filepath.endswith(".pdf") else UnstructuredMarkdownLoader(filepath)
-                parsed_docs = loader.load()
+                # --- Switched to UnstructuredPDFLoader ---
+                loader = UnstructuredPDFLoader(filepath) if filepath.endswith(".pdf") else UnstructuredMarkdownLoader(
+                    filepath)
+
+                # --- CRITICAL LOAD ERROR HANDLING ADDED ---
+                try:
+                    parsed_docs = loader.load()
+                except Exception as load_e:
+                    # Catch and log any deep errors during the parsing process and continue
+                    console.print(
+                        f"[bold red]CRITICAL LOAD ERROR:[/bold red] Failed to parse {os.path.basename(filepath)}. Skipping. Reason: {load_e}")
+                    continue
+                    # -----------------------------------------------
 
                 # Attach source metadata for later
                 for doc in parsed_docs:
@@ -147,7 +159,7 @@ class IngestPipeline:
                     f"[green]Parsed:[/green] {os.path.basename(filepath)} ({len(parsed_docs)} pages/sections)")
 
             except Exception as e:
-                console.print(f"[red]Error parsing {os.path.basename(filepath)}: {e}")
+                console.print(f"[red]Error processing file {os.path.basename(filepath)} (pre-load issue):[/red] {e}")
 
         return docs
 
@@ -155,8 +167,6 @@ class IngestPipeline:
         """
         Chunks the documents, queues unique chunks, and processes them in batches
         for embedding and indexing.
-        FIX: Uses a dictionary (chunks_map) to enforce deduplication of chunks
-        across ALL input documents before starting the batching loop.
         """
         if not docs:
             console.print("[bold yellow]No documents passed for indexing.[/bold yellow]")
@@ -164,32 +174,61 @@ class IngestPipeline:
 
         # 1. Chunking and Deduplication
         splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=60)
-
-        # Use a dictionary to enforce uniqueness by chunk_id across all documents
         chunks_map = {}
 
         for d in docs:
+            # --- RESILIENCE CHECK ---
+            if not d.page_content or not isinstance(d.page_content, str) or d.page_content.strip() == "":
+                source_file = d.metadata.get('source', 'Unknown File')
+                console.print(
+                    f"[bold red]Skipping Document:[/bold red] '{os.path.basename(source_file)}'. Document content is empty or invalid.")
+                continue
+
+            # Use 'ignore' error handling for encoding when hashing
             text_chunks = splitter.split_text(d.page_content)
+
+            if not text_chunks:
+                source_file = d.metadata.get('source', 'Unknown File')
+                console.print(
+                    f"[bold yellow]Skipping Document:[/bold yellow] '{os.path.basename(source_file)}'. No chunks generated (content too short or sparse).")
+                continue
+
             for chunk in text_chunks:
-                h = hashlib.sha256(chunk.encode('utf-8')).hexdigest()
+                h = hashlib.sha256(chunk.encode('utf-8', errors='ignore')).hexdigest()
                 chunk_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, h))
 
-                # If the chunk ID is already in the map, skip it (deduplication)
                 if chunk_id in chunks_map:
                     continue
 
-                # Generate metadata with required fields
                 metadata = d.metadata.copy()
                 metadata["indexed_at"] = str(datetime.now())
 
-                # Store the unique chunk data
+                # --- Metadata Sanitization (CRITICAL FOR CHROMA DB VALIDATION) ---
+                sanitized_metadata = {}
+                for key, value in metadata.items():
+                    # ChromaDB only supports str, int, float for metadata values
+                    if isinstance(value, (str, int, float)):
+                        # Handle potential NaN, Inf/-Inf floats which break JSON/Chroma
+                        if isinstance(value, float) and (value != value or value in [float('inf'), float('-inf')]):
+                            sanitized_metadata[key] = str(value)
+                        else:
+                            sanitized_metadata[key] = value
+                    else:
+                        # Convert all other complex types (e.g., lists, dicts) to JSON string
+                        try:
+                            sanitized_metadata[key] = json.dumps(value)
+                        except:
+                            # Fallback to string representation if JSON serialization fails
+                            sanitized_metadata[key] = str(value)
+
+                # ------------------------------------------------------------------
+
                 chunks_map[chunk_id] = {
                     "chunk": chunk,
                     "id": chunk_id,
-                    "metadata": metadata
+                    "metadata": sanitized_metadata  # Use sanitized metadata
                 }
 
-        # Convert the unique dictionary values back to a list for batching
         all_chunks_data = list(chunks_map.values())
 
         num_chunks_to_add = len(all_chunks_data)
@@ -240,8 +279,6 @@ class IngestPipeline:
     def cleanup_deleted_files(self, master_docs_path):
         """
         Identifies and removes chunks in the DB whose source file no longer exists on disk.
-        CRITICAL FIX: This now only checks for stale files within the scope of the
-        currently indexed master_docs_path to prevent deleting data from other subfolders.
         """
         console.print("\n--- Starting Scoped Stale Chunk Cleanup ---")
 
@@ -255,7 +292,6 @@ class IngestPipeline:
         # 3. Filter DB sources to only include those within the current scope
         sources_in_scope = set()
         for source in sources_in_db:
-            # Check if the source path starts with the scope path
             if source.startswith(scope_path_abs):
                 sources_in_scope.add(source)
 

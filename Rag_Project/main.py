@@ -4,6 +4,7 @@ import sys
 import os
 import traceback
 import rich
+import subprocess  # New import for the 'app' mode
 
 # --- Real Imports from Project Structure ---
 # These must exist in separate files for the application to run.
@@ -30,12 +31,14 @@ def main():
 
     parser.add_argument(
         "--mode",
-        choices=["index", "query", "wipe"],
+        # Added 'app' to the choices
+        choices=["index", "query", "wipe", "app"],
         required=True,
         help="""\nMode of operation:
   - index: Parse and embed documents from a folder.
   - query: Retrieve and generate an answer from the indexed database.
   - wipe: Permanently delete ALL data from the vector database.
+  - app: Launch the Streamlit web chat interface.
 """
     )
     parser.add_argument(
@@ -49,8 +52,24 @@ def main():
 
     args = parser.parse_args()
 
+    # --- Mode: APP (NEW) ---
+    if args.mode == "app":
+        try:
+            console.print("🌐 Launching Streamlit web application...")
+            # Use subprocess to run the Streamlit command. This is essential
+            # for the 'run_rag.bat' file to launch the web app cleanly.
+            subprocess.run(["streamlit", "run", "app.py"], check=True)
+        except FileNotFoundError:
+            console.print("❌ Error: 'streamlit' command not found.")
+            console.print("Ensure Streamlit is installed (pip install streamlit) and your virtual environment is active.")
+        except Exception as e:
+            console.print(f"❌ An error occurred while running the Streamlit app: {e}")
+            traceback.print_exc()
+        sys.exit(0)
+
+
     # --- Mode: WIPE ---
-    if args.mode == "wipe":
+    elif args.mode == "wipe":
         try:
             collection = get_vector_db()
             confirm = input(

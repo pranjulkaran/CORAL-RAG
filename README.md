@@ -129,7 +129,7 @@ python main.py --mode app
 ## 🗂 Folder Structure
 
 ```
-agentic-rag/
+RAG_Project/
 ├─ main.py                 # CLI entry point
 ├─ app.py                  # Streamlit web app
 ├─ ingest_pipeline.py      # Document parsing & indexing
@@ -162,5 +162,6 @@ agentic-rag/
     
 - [Poppler](https://poppler.freedesktop.org/)
     
+
 
 

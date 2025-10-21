@@ -1,6 +1,6 @@
-Absolutely! Here's a full **`README.md`** draft for your RAG project, tailored for your setup (Python + Streamlit + Tesseract + Poppler):
 
-````markdown
+
+
 # Agentic RAG System
 
 A modular Retrieval-Augmented Generation (RAG) system with CLI and Streamlit web interface, supporting document indexing, querying, and OCR for PDFs/images. Built for local LLMs with vector database support.
@@ -166,3 +166,4 @@ agentic-rag/
     
 - [Poppler](https://poppler.freedesktop.org/)
     
+

@@ -53,7 +53,7 @@ class AgenticRAG:
             response = ollama.chat(
                 model=self.model,
                 messages=messages,
-                options={"temperature": 0.3, "num_ctx": 4096, "num_predict": 512}
+                options={"temperature": 0.7, "num_ctx": 8000, "num_predict": 8000}
             )
             return response["message"]["content"]
         except Exception as e:

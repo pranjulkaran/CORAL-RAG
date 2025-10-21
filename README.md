@@ -1,33 +1,168 @@
-# 🧠 Personal RAG Knowledge Base
+Absolutely! Here's a full **`README.md`** draft for your RAG project, tailored for your setup (Python + Streamlit + Tesseract + Poppler):
 
-This project implements a highly efficient and robust Retrieval-Augmented Generation (RAG) pipeline designed to query diverse personal documents, including structured notes (`.md`) and rich external resources (`.pdf`). It leverages cutting-edge embedding and local LLM technology via Ollama to ensure private, accurate, and context-aware responses.
+````markdown
+# Agentic RAG System
 
-## 🚀 Key Features
+A modular Retrieval-Augmented Generation (RAG) system with CLI and Streamlit web interface, supporting document indexing, querying, and OCR for PDFs/images. Built for local LLMs with vector database support.
 
-- **State-of-the-Art (SOTA) Retrieval:** Uses the **`mxbai-embed-large`** model for embedding, which is recognized for providing superior semantic search accuracy, ensuring the AI retrieves the most relevant context from your top-tier PDFs and notes.
+---
+
+## 🌟 Features
+
+- **Indexing**: Parse, embed, and store documents in a vector database.  
+- **Querying**: Retrieve and generate answers using top-k re-ranked context chunks.  
+- **OCR Support**: Extract text from PDFs and images using Tesseract OCR.  
+- **PDF Conversion**: Convert PDFs to images using Poppler for better OCR handling.  
+- **Web Interface**: Streamlit-based chat for interactive queries.  
+- **Vector DB Management**: Option to wipe the database safely.  
+- **Rich Console Output**: Clean CLI formatting with `rich`.  
+
+---
+
+## ⚙️ Requirements
+
+- Python ≥ 3.10
+- Virtual environment recommended  
+
+### Python Packages
+
+All required Python packages are listed in `requirements.txt` (install with `pip install -r requirements.txt`). Key dependencies include:
+
+- `chromadb` → Vector database  
+- `langchain`, `llama_cpp_python` → LLM integration  
+- `sentence-transformers` → Embeddings  
+- `PyMuPDF`, `pdf2image`, `PyPDF2` → PDF handling  
+- `pillow`, `opencv-python` → Image processing  
+- `unstructured.pytesseract` → OCR pipeline  
+- `streamlit` → Web UI  
+- `rich` → Console formatting  
+
+### System Dependencies
+
+- **Tesseract OCR** (Windows binaries provided in repo)  
+- **Poppler utilities** (Windows binaries provided in repo)  
+
+> Ensure both Tesseract and Poppler binaries are in your system PATH or set via environment variables.
+
+---
+
+## 📥 Installation
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/your-username/agentic-rag.git
+cd agentic-rag
+````
+
+2. Create a virtual environment:
     
-- **High-Speed Indexing:** Implements batched processing (1000 chunks per API call) for massively reduced indexing time.
-    
-- **Intelligent Incremental Updates:** Documents are checked via **Mtime** and **Content Hash**. If a document is merely moved or renamed, the system performs a fast metadata **UPSERT** instead of an expensive, full re-embedding.
-    
-- **Safe Multi-Folder Management:** Uses **Scoped Cleanup** to safely index documents from separate folders (`--folder "PathA"`, `--folder "PathB"`) without accidentally deleting data from other indexed paths.
+
+```bash
+python -m venv venv
+source venv/bin/activate      # Linux/macOS
+venv\Scripts\activate         # Windows
+```
+
+3. Install Python dependencies:
     
 
-## 🛠️ Usage and Setup
+```bash
+pip install -r requirements.txt
+```
 
-### 1. Indexing Documents
+4. Add Tesseract and Poppler to your PATH (or use provided binaries folder).
+    
 
-Use the `main.py` script with the `--mode index` flag to process a specific folder recursively.
+---
+
+## 🏃 Usage
+
+### 1. CLI Modes
+
+- **Index Documents**:
+    
+
+```bash
+python main.py --mode index --folder "docs"
+```
+
+- **Query the Vector Database**:
+    
+
+```bash
+python main.py --mode query --query "What is Artificial Intelligence?"
+```
+
+- **Wipe the Vector Database**:
+    
+
+```bash
+python main.py --mode wipe
+```
+
+- **Launch Streamlit Web App**:
+    
+
+```bash
+python main.py --mode app
+```
+
+---
+
+### 2. Streamlit Web Interface
+
+1. Run:
+    
+
+```bash
+python main.py --mode app
+```
+
+2. Open the URL shown in your terminal (usually `http://localhost:8501`)
+    
+3. Ask questions interactively, and view source documents and context chunks.
+    
+
+---
+
+## 🗂 Folder Structure
 
 ```
-# Example: Indexing a source folder
-python main.py --mode index --folder "D:\obsidian notes\....."
+agentic-rag/
+├─ main.py                 # CLI entry point
+├─ app.py                  # Streamlit web app
+├─ ingest_pipeline.py      # Document parsing & indexing
+├─ rag_agentic.py          # RAG query agent
+├─ vector_db_factory.py    # Vector database initialization
+├─ docs/                   # Example documents for indexing
+├─ binaries/
+│  ├─ tesseract/           # Tesseract OCR binaries (Windows)
+│  └─ poppler/             # Poppler binaries (Windows)
+├─ requirements.txt
+└─ README.md
 ```
 
-### 2. Launching the Chat Interface
+---
 
-Start the Streamlit application to begin chatting with your indexed knowledge base.
+## ⚡ Notes
 
-```
-streamlit run app.py
-```
+- Always activate your virtual environment before running any commands.
+    
+- For PDF OCR, Poppler is required to convert pages into images.
+    
+- Ensure your Tesseract installation matches your platform (Windows, Linux, macOS).
+    
+
+---
+
+## 📚 References
+
+- [LangChain Documentation](https://python.langchain.com/)
+    
+- [Chromadb Documentation](https://docs.trychroma.com/)
+    
+- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
+    
+- [Poppler](https://poppler.freedesktop.org/)
+    

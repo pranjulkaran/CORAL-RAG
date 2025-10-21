@@ -1,94 +1,274 @@
-# 🚀 Agentic RAG System Execution Guide
 
-This guide outlines the steps and commands required to run your custom Retrieval-Augmented Generation (RAG) system, which uses Ollama, ChromaDB, and a two-stage agentic pipeline.
+# **Agentic RAG - User Guide**
 
-## 1. Initial Setup and Prerequisites
+## **Overview**
 
-Before running any commands, ensure your environment is configured correctly.
+Agentic RAG is a **Retrieval-Augmented Generation (RAG) system** that allows you to query a local knowledge base for context-grounded answers using **LLM-powered generation**. It supports:
 
-### 1.1. Environment and Models
-
-1. **Ollama:** Ensure the **Ollama server is running** in the background.
+- Indexed document retrieval from PDFs, text, and images
     
-2. **Models:** The system requires two models, which must be pulled via Ollama:
+- Hybrid LLM + vector database interaction
     
-    - **LLM (for Generation):** `llama3.2:latest` (or the model configured in `rag_agentic.py`)
+- Local RAG mode (grounded answers) or general chat mode (LLM-only)
+    
+- Adjustable retrieval parameters (Top K and Top N chunks)
+    
+
+This guide helps end-users install dependencies, run the system, and interact with it effectively.
+
+---
+
+## **1. System Requirements**
+
+|Component|Minimum Requirement|
+|---|---|
+|Python|3.11+|
+|Virtual Environment|Recommended (`venv` or `conda`)|
+|Ollama LLM|`llama3.2:latest`|
+|Vector Database|ChromaDB|
+|OCR Engine|Tesseract OCR|
+|PDF Parsing|Poppler|
+|OS|Windows, Linux, macOS|
+
+---
+
+## **2. Installation**
+
+### **2.1 Clone Repository**
+
+```bash
+git clone <your-repo-url>
+cd <repo-folder>
+python -m venv venv
+source venv/bin/activate      # Linux/macOS
+venv\Scripts\activate         # Windows
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+---
+
+### **2.2 System Dependencies (Windows)**
+
+1. **Poppler** (for PDF parsing)
+    
+    - Download from the GitHub repo: `[YourRepo]/tools/poppler/`
         
-    - **Embedder (for Vectorization):** `mxbai-embed-large:335m` (or the model configured in `rag_embedder.py`)
+    - Extract and add the `bin` folder to your **system PATH**.
+        
+2. **Tesseract OCR** (for scanned PDFs/images)
+    
+    - Download from the GitHub repo: `[YourRepo]/tools/tesseract/`
+        
+    - Install or extract, then add the path to the executable to your **system PATH**.
         
 
-### 1.2. Configuration Check
+**Verify Installation**
 
-Verify the settings in your `config.py` file, especially the paths:
+```bash
+tesseract --version
+pdftotext -v
+```
 
-|   |   |   |
-|---|---|---|
-|**Variable**|**Current Value (from config.py)**|**Description**|
-|`MASTER_DOCS_PATH`|`D:\obsidian notes\Note`|The folder containing your source files (.pdf, .md).|
-|`CHROMA_DB_PATH`|`D:\rag_storage`|Where the vector database files are stored.|
-|`EMBEDDING_API_BATCH_SIZE`|`1000`|Batches size for embedding (optimized for speed).|
+---
 
-## 2. Data Management (Using `main.py`)
+### **2.3 LLM Setup**
 
-The `main.py` script is your command-line tool for preparing and managing the vector database. **You MUST run the `index` mode at least once before using the `query` or `app` modes.**
+- Ensure **Ollama** is installed and running:
+    
 
-### 2.1. 📥 Index Mode (Initial Ingestion and Updates)
+```bash
+ollama list
+```
 
-This is the most critical step. It parses, chunks, embeds, and indexes your documents into ChromaDB. It only re-indexes files that have been modified (or moved) since the last run, leveraging **Content Hash** and **Scoped Cleanup** for efficiency and safety.
+- Required LLM model: `llama3.2:latest`
+    
 
-|   |   |
-|---|---|
-|**Command**|**Purpose**|
-|**`python main.py --mode index --folder "D:\obsidian notes\Note"`**|Scans the folder, checks for new/modified documents, deletes old chunks, and adds new vectors.|
+---
 
-### 2.2. 🔎 Query Mode (CLI Test)
+## **3. Modes of Operation**
 
-Run a direct query against your RAG system to confirm the pipeline is working correctly.
+### **3.1 Indexing Documents**
 
-|   |   |
-|---|---|
-|**Command**|**Purpose**|
-|**`python main.py --mode query --query "Explain the concept of margin of safety from the Deep Value book."`**|Executes the full RAG pipeline (embed query, retrieve, re-rank, generate answer).|
+Prepares documents for vector search.
 
-### 2.3. 🗑️ Wipe Mode (Database Reset)
+```bash
+python main.py --mode index --folder path/to/documents
+```
 
-Use this command to completely and permanently delete **all** documents from the `rag_docs` collection in your ChromaDB.
+**Notes:**
 
-|   |   |
-|---|---|
-|**Command**|**Purpose**|
-|**`python main.py --mode wipe`**|Clears the database. **You must type 'yes' to confirm deletion.**|
+- Supports PDFs, text files, and images.
+    
+- Uses Poppler for PDF text extraction.
+    
+- Uses Tesseract OCR for scanned PDFs or images.
+    
 
-### 2.4. 🔎 app Mode (RUN command)
+---
 
-Run a direct run command using main
+### **3.2 Query Mode**
 
-|   |   |
-|---|---|
-|**Command**|**Purpose**|
-|**`python main.py --mode app `**|Executes the full RAG pipeline (embed query, retrieve, re-rank, generate answer using the app.py streamlit ui local host).|
+Retrieve answers from the RAG database via CLI.
 
+```bash
+python main.py --mode query --query "Your question here"
+```
 
-## 3. Conversational Interface (Using `app.py`)
+**Output includes:**
 
-The Streamlit application provides a user-friendly, persistent, and feature-rich interface for interacting with your RAG system.
+- Answer from the LLM
+    
+- Sources used (document filenames)
+    
+- Context chunks retrieved from the database
+    
 
-### 3.1. 🌐 Launch the Application
+---
 
-Launch the web interface using the following command:
+### **3.3 Wipe Database**
 
-|   |   |
-|---|---|
-|**Command**|**Purpose**|
-|**`streamlit run app.py`**|Starts the web server (usually on port 8501).|
+Permanently delete all indexed documents.
 
-### 3.2. ✨ Key Web Features
+```bash
+python main.py --mode wipe
+```
 
-|   |   |   |
-|---|---|---|
-|**Feature**|**How to Use**|**Benefit**|
-|**Context Display**|Click the **"View Re-Ranked Chunks"** expander under the Bot's answer.|View the exact document chunks and filenames used to formulate the response.|
-|**Source Citation**|Sources are displayed as **"Cited Sources"** badges.|Provides verifiable document names for the information retrieved.|
-|**Start New Chat**|Click the **"Start New Chat"** button in the sidebar.|Clears the history so the LLM doesn't incorrectly use old context in a new conversation.|
+- Requires confirmation (`yes`) before deletion.
+    
 
-|**Parameters**|View the sidebar for settings like **`top_k_retrieve`** and **`top_n_rank`**.|Gives transparency into the RAG agent's retrieval configuration.|
+---
+
+### **3.4 Web Chat Interface**
+
+Launch a Streamlit-based chat UI with RAG and general chat modes:
+
+```bash
+python main.py --mode app
+```
+
+**Features:**
+
+- Switch between **Agentic RAG mode** and **Regular Chat mode**
+    
+- View context chunks and sources for RAG responses
+    
+- Adjustable **Top K / Top N** retrieval settings
+    
+- Chat history persistence across sessions
+    
+
+---
+
+## **4. RAG Interaction Details**
+
+### **4.1 Modes**
+
+- **Agentic RAG (default)**: Retrieves and ranks documents from the database to answer your query.
+    
+- **Regular Chat**: Uses LLM alone without retrieval.
+    
+
+**Mode Switching:**
+
+- `/rag` → Switch to RAG Mode
+    
+- `/chat` → Switch to LLM-only mode
+    
+
+---
+
+### **4.2 Retrieval Tuning**
+
+- **Top K (Retrieve):** Number of candidate chunks fetched from DB
+    
+- **Top N (Context):** Number of top-ranked chunks sent to the LLM
+    
+
+Adjust via Streamlit sidebar or CLI (internal defaults: K=15, N=5).
+
+---
+
+### **4.3 Supported Document Types**
+
+- PDF (`.pdf`) – via Poppler and Tesseract for scanned PDFs
+    
+- Text (`.txt`)
+    
+- Images (`.png`, `.jpg`) – OCR applied via Tesseract
+    
+
+---
+
+### **4.4 Chat Features**
+
+- Persistent chat history stored locally (`chat_persistence.json`)
+    
+- Chat bubbles styled in dark mode (customizable in `app.py`)
+    
+- Expandable sections for viewing context chunks and sources
+    
+
+---
+
+## **5. File Organization**
+
+```
+/project-root
+│
+├─ /tools
+│   ├─ /poppler/        # Poppler binaries
+│   └─ /tesseract/      # Tesseract installer
+│
+├─ /docs               # Sample documents
+├─ ingest_pipeline.py  # Document parsing and embedding
+├─ rag_agentic.py      # RAG agent implementation
+├─ vector_db_factory.py# ChromaDB connection factory
+├─ app.py              # Streamlit interface
+├─ main.py             # CLI interface
+└─ requirements.txt
+```
+
+---
+
+## **6. Troubleshooting**
+
+1. **Ollama LLM not found:**
+    
+    - Ensure Ollama is running: `ollama list`
+        
+    - Verify the required model is installed: `llama3.2:latest`
+        
+2. **Poppler/Tesseract not recognized:**
+    
+    - Confirm paths are added to **system PATH**
+        
+    - Open a new terminal and run `tesseract --version` and `pdftotext -v`
+        
+3. **Database errors:**
+    
+    - Check ChromaDB configuration
+        
+    - Use `--mode wipe` cautiously to reset DB
+        
+4. **RAG answers missing context:**
+    
+    - Increase Top K/N in the Streamlit sidebar
+        
+    - Ensure documents are indexed properly
+        
+
+---
+
+## **7. Tips**
+
+- Use clear, descriptive queries for best RAG results.
+    
+- Regularly index new or updated documents for up-to-date answers.
+    
+- For scanned PDFs, ensure resolution is sufficient for Tesseract OCR.
+    
+
+---
+
+**End of User Guide**

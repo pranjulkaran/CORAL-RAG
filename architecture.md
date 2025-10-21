@@ -1,51 +1,203 @@
-# 🧱 System Architecture: Agentic RAG Pipeline
 
-This document outlines the architecture and data flow of the Retrieval-Augmented Generation (RAG) system, emphasizing the three core layers: **Ingestion**, **Storage/Retrieval**, and **Generation**.
+# 🏗️ Agentic RAG System – Architecture
 
-## 1. Conceptual Flow (The Two-Stage Agentic Pipeline)
+## 1️⃣ **Overview**
 
-The system is designed around two main phases—Ingestion (for building the knowledge base) and Query (for generating answers). The Query phase uses a multi-step "Agentic" approach for higher quality results.
+The Agentic RAG System is a **Retrieval-Augmented Generation (RAG) engine** designed to leverage **local documents** (like PDFs, Markdown, or images) and provide **context-aware responses** via an LLM.
 
-|Phase|Steps|Key Components|
-|---|---|---|
-|**Ingestion** (Offline)|**Load & Process:** Load documents, calculate **Content Hash** and **Mtime**. **Chunk:** Split documents into small, indexed segments. **Embed:** Convert chunks to vectors using `mxbai-embed-large`. **Index:** Store vectors in ChromaDB.|`ingestion_pipeline.py`, `rag_embedder.py`, ChromaDB|
-|**Query** (Online)|**Retrieve (k):** Embed user query and fetch `top_k_retrieve` candidates from the Vector Store. **Re-Rank (n):** An internal agent filters and re-ranks the candidates based on relevance to the full context. **Generate:** Send the top `top_n_rank` chunks + the user query to the LLM.|`rag_agentic.py`, Ollama LLM (`llama3.2:latest`)|
+It integrates:
 
-## 2. Core Components and Technology Stack
-
-The pipeline is built on an open-source, local-first stack, ensuring privacy and full control over model selection.
-
-### 2.1. The Knowledge Index (ChromaDB)
-
-- **Role:** Acts as the persistent storage layer for the vector embeddings and metadata.
+- **Vector database for embeddings**
     
-- **Key Feature:** Supports **UPSERT** functionality, which is critical for the pipeline's efficiency, allowing for fast metadata updates (like changing a file's path) without re-embedding.
+- **Tesseract OCR** for scanned documents
     
-- **Implementation:** Managed by **`vector_db_factory.py`** and stored locally at the path defined in `config.py`.
+- **Poppler** for PDF text extraction
+    
+- **Streamlit Web UI** for interactive chat
     
 
-### 2.2. The Vectorizer (Ollama + `mxbai-embed-large`)
+---
 
-- **Role:** Responsible for converting both document chunks (Ingestion) and the user's query (Query) into dense numerical vectors.
+## 2️⃣ **High-Level Architecture**
+
+```
++------------------------------------------------------------+
+|                        main.py                             |
+|  CLI Entry Point: index / query / wipe / app               |
++------------------------------------------------------------+
+        |               |                |
+        ↓               ↓                ↓
++----------------+  +----------------+  +----------------+
+| ingest_pipeline|  | rag_agentic.py |  | vector_db_factory|
++----------------+  +----------------+  +----------------+
+| - File parsing |  | - Retrieval    |  | - DB connection |
+| - PDF parsing  |  | - Re-rank      |  | - CRUD ops      |
+|   (Poppler)    |  | - LLM generation|  | - Wipe support  |
+| - OCR (Tesseract)| | - Source tracking|                  |
+| - Text chunking|  +----------------+  +----------------+
+| - Hash checks  |        
+| - Incremental  |        
++----------------+        
+        |
+        ↓
++---------------------+
+|   Vector Database    |
+|   (Chroma / FAISS)   |
++---------------------+
+        |
+        ↓
++---------------------+
+|     LLM Engine       |
+| (Ollama / OpenAI)    |
++---------------------+
+        |
+        ↓
++---------------------+
+|  Streamlit Web UI    |
+|       (app.py)       |
++---------------------+
+```
+
+---
+
+## 3️⃣ **Module Responsibilities**
+
+### **main.py**
+
+- CLI entry point for all operations.
     
-- **Key Feature:** Uses the **`mxbai-embed-large`** model, which provides State-of-the-Art (SOTA) semantic accuracy for its size, ensuring precise retrieval.
+- Modes:
     
-- **Implementation:** Handled by **`rag_embedder.py`** using asynchronous, batched calls to the local Ollama server.
+    - `index` → Parse + embed new/changed files
+        
+    - `query` → Ask RAG for answers
+        
+    - `wipe` → Delete all vectors
+        
+    - `app` → Launch Streamlit web interface
+        
+- Uses `asyncio` for indexing.
     
 
-### 2.3. The Ingestion Engine (Optimized for Efficiency)
+### **ingest_pipeline.py**
 
-- **Role:** Manages the entire data preparation workflow, focusing heavily on incremental updates and stability.
+- Handles document ingestion:
     
-- **Key Feature:** Implements advanced logic for **Scoped Cleanup** (protects indexed data from other folders) and **Content Hash** comparison (prevents costly re-embedding of moved files).
-    
-- **Implementation:** Contained entirely within **`ingestion_pipeline.py`**.
+    - File parsing (PDF, Markdown, TXT)
+        
+    - **Poppler** for PDF text extraction
+        
+    - **Tesseract OCR** for scanned docs/images
+        
+    - Text chunking & hashing
+        
+    - Incremental indexing
+        
+- Sends processed chunks to **Vector DB**.
     
 
-### 2.4. The Generator and Agent (LLM + Logic)
+### **vector_db_factory.py**
 
-- **Role:** Orchestrates the multi-stage retrieval process and ultimately synthesizes the final answer.
+- Manages the vector database connection:
     
-- **Key Feature:** Uses a two-step retrieval process (Retrieve `k` then Re-Rank to `n`) to reduce noise and provide the LLM with the highest quality context.
+    - Create / fetch collections
+        
+    - CRUD operations
+        
+    - Wipe / cleanup
+        
+- Backend: **Chroma**, optionally FAISS.
     
-- **Implementation:** Contained within **`rag_agentic.py`** (implied) and uses the locally running `llama3.2:latest` model via Ollama.
+
+### **rag_agentic.py**
+
+- Implements **RAG logic**:
+    
+    1. Retrieve top-k relevant chunks
+        
+    2. Re-rank chunks (semantic similarity)
+        
+    3. Generate answer via LLM
+        
+    4. Return structured results:
+        
+        ```json
+        {
+            "answer": "...",
+            "sources": ["doc1.pdf", "doc2.md"],
+            "context_chunks": ["...", "..."]
+        }
+        ```
+        
+
+### **app.py**
+
+- Streamlit-based chat interface:
+    
+    - Interactive Q&A
+        
+    - Persistent chat history
+        
+    - Contextual RAG responses
+        
+
+---
+
+## 4️⃣ **Data Flow**
+
+```
+User Input
+   ↓
++-----------------------+
+|  main.py CLI / app.py  |
++-----------------------+
+   ↓
+[If indexing] → ingest_pipeline → Poppler / OCR → Chunk / Hash → Vector DB
+[If query]   → rag_agentic → Retrieve & Re-rank → LLM → Answer
+   ↓
+Web / CLI Output (Answer + Sources + Chunks)
+```
+
+---
+
+## 5️⃣ **Key Integrations**
+
+|Tool|Purpose|
+|---|---|
+|**Tesseract OCR**|Extract text from scanned PDFs/images|
+|**Poppler**|Extract text content from PDFs|
+|**Chroma / FAISS**|Vector storage for semantic search|
+|**Streamlit**|Web-based chat interface|
+|**Ollama / OpenAI LLM**|Generates answers based on retrieved context|
+
+---
+
+## 6️⃣ **Developer Notes**
+
+- Async indexing ensures performance on large datasets.
+    
+- Modular design:
+    
+    - ingestion → vectorization → retrieval → generation
+        
+- Web UI is lightweight; heavy processing stays in backend modules.
+    
+- History & context management for multi-turn conversations.
+    
+- Supports incremental re-indexing & cleanup of deleted files.
+    
+
+---
+
+## 7️⃣ **Future Enhancements**
+
+- Cross-document graph search.
+    
+- Metadata filtering (tags, dates, topics).
+    
+- Local LLM fallback for offline usage.
+    
+- Summarization or document linking agent.
+    
+- Real-time vault watcher for automatic indexing.
+    

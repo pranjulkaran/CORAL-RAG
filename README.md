@@ -51,8 +51,8 @@ All required Python packages are listed in `requirements.txt` (install with `pip
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/your-username/agentic-rag.git
-cd agentic-rag
+git clone https://github.com/pranjulkaran/RAG.git
+cd Rag_Project
 ````
 
 2. Create a virtual environment:
@@ -135,10 +135,6 @@ agentic-rag/
 ├─ ingest_pipeline.py      # Document parsing & indexing
 ├─ rag_agentic.py          # RAG query agent
 ├─ vector_db_factory.py    # Vector database initialization
-├─ docs/                   # Example documents for indexing
-├─ binaries/
-│  ├─ tesseract/           # Tesseract OCR binaries (Windows)
-│  └─ poppler/             # Poppler binaries (Windows)
 ├─ requirements.txt
 └─ README.md
 ```
@@ -166,4 +162,5 @@ agentic-rag/
     
 - [Poppler](https://poppler.freedesktop.org/)
     
+
 

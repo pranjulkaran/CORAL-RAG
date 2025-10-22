@@ -51,7 +51,7 @@ All required Python packages are listed in `requirements.txt` (install with `pip
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/pranjulkaran/RAG.git
+git clone https://github.com/pranjulkaran/CORAL-RAG.git
 cd Rag_Project
 ````
 
@@ -162,6 +162,7 @@ RAG_Project/
     
 - [Poppler](https://poppler.freedesktop.org/)
     
+
 
 
 

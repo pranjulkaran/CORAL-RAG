@@ -1,7 +1,7 @@
 
 
 
-# Agentic RAG System
+# CORAL-RAG[Context-Orchestrated Retrieval And Learning RAG]
 
 A modular Retrieval-Augmented Generation (RAG) system with CLI and Streamlit web interface, supporting document indexing, querying, and OCR for PDFs/images. Built for local LLMs with vector database support.
 
@@ -162,6 +162,7 @@ RAG_Project/
     
 - [Poppler](https://poppler.freedesktop.org/)
     
+
 
 
 

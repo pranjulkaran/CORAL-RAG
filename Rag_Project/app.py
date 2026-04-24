@@ -279,7 +279,7 @@ def get_regular_chat_response(prompt, history):
     response = ollama.chat(
         model=rag_agent.model,  # Reuse the RAG model for consistency
         messages=messages,
-        options={"temperature": 0.7, "num_ctx": 4096, "num_predict": 1000}
+        options={"temperature": 0.7, "num_ctx": 8000, "num_predict": 8000}
     )
     return response["message"]["content"]
 
@@ -479,6 +479,7 @@ if (st.session_state.chat_history and
         st.session_state.chat_history[-1]["message"].lower() not in [CHAT_MODE_KEYWORD, RAG_MODE_KEYWORD]):
 
     latest_prompt = st.session_state.chat_history[-1]["message"]
+    # Keep rag_history for the /chat mode (Regular Chat)
     rag_history = st.session_state.chat_history[:-1]
 
     bot_message = {"speaker": "Bot", "message": "", "sources": [], "context_chunks": []}
@@ -488,10 +489,9 @@ if (st.session_state.chat_history and
         with st.spinner("🔍 Searching local documents and generating RAG response..."):
             try:
                 # 1. Attempt local RAG query
-                # --- CRITICAL: PASSING DYNAMIC K and N values ---
+                # Removed 'chat_history' from the query call
                 result = rag_agent.query(
                     latest_prompt,
-                    chat_history=rag_history,
                     top_k=st.session_state.top_k_retrieve,
                     top_n=st.session_state.top_n_rank
                 )
@@ -518,6 +518,7 @@ if (st.session_state.chat_history and
     else:
         with st.spinner("💬 Generating regular response..."):
             try:
+                # Regular chat still uses history
                 answer = get_regular_chat_response(latest_prompt, rag_history)
                 bot_message["message"] = answer
             except Exception as e:

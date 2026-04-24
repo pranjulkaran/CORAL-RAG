@@ -4,16 +4,16 @@ import sys
 import os
 import traceback
 import rich
-import subprocess  # New import for the 'app' mode
+import subprocess
+from rich.console import Console  # Explicitly import Console for rich.print
 
 # --- Real Imports from Project Structure ---
-# These must exist in separate files for the application to run.
 from vector_db_factory import get_vector_db
 from ingest_pipeline import IngestPipeline
 from rag_agentic import AgenticRAG
 
 # Initialize Rich console for clean output
-console = rich.get_console()
+console = Console()
 
 
 # Function to wrap the async call for use in synchronous main()
@@ -49,19 +49,25 @@ def main():
         "--query",
         help="The question or text query (required for 'query' mode)."
     )
+    # --- NEW ARGUMENT FOR DEBUGGING ---
+    parser.add_argument(
+        "--debug-prompt",
+        action="store_true",  # This makes it a flag that defaults to False
+        help="When used with 'query' mode, performs retrieval but skips the final LLM call, showing only the assembled prompt."
+    )
+    # --- END NEW ARGUMENT ---
 
     args = parser.parse_args()
 
-    # --- Mode: APP (NEW) ---
+    # --- Mode: APP ---
     if args.mode == "app":
         try:
             console.print("🌐 Launching Streamlit web application...")
-            # Use subprocess to run the Streamlit command. This is essential
-            # for the 'run_rag.bat' file to launch the web app cleanly.
             subprocess.run(["streamlit", "run", "app.py"], check=True)
         except FileNotFoundError:
             console.print("❌ Error: 'streamlit' command not found.")
-            console.print("Ensure Streamlit is installed (pip install streamlit) and your virtual environment is active.")
+            console.print(
+                "Ensure Streamlit is installed (pip install streamlit) and your virtual environment is active.")
         except Exception as e:
             console.print(f"❌ An error occurred while running the Streamlit app: {e}")
             traceback.print_exc()
@@ -111,7 +117,7 @@ def main():
 
         except Exception as e:
             print(f"❌ An error occurred during indexing: {e}")
-            traceback.print_exc()
+            tracebox.print_exc()
             sys.exit(1)
 
     # --- Mode: QUERY ---
@@ -120,13 +126,50 @@ def main():
             print("❌ Error: --query is required in 'query' mode.")
             sys.exit(1)
 
-        # The query call now relies on internal RAG agent settings for top_k
-        print(f"🔎 Querying RAG agent with: '{args.query}' (using internal re-ranking logic)")
+        # New logic to determine if we are in debug mode
+        is_debug_mode = args.debug_prompt
+
+        mode_text = "DEBUG PROMPT ONLY" if is_debug_mode else "RAG GENERATION"
+        console.print(
+            f"🔎 Querying RAG agent with: '[bold cyan]{args.query}[/bold cyan]' (Mode: [bold]{mode_text}[/bold])")
+
         try:
             rag = AgenticRAG()
 
-            # The AgenticRAG object handles retrieval, re-ranking, and LLM generation
-            res = rag.query(args.query)
+            # Pass the debug flag to the query method
+            # This is where the magic happens: it returns the prompt instead of the answer
+            res = rag.query(args.query, debug_prompt_only=is_debug_mode)
+
+            # --- DEBUG PROMPT OUTPUT ---
+            if is_debug_mode:
+                print("\n" + "=" * 80)
+                rich.print("[bold yellow]DEBUG PROMPT MODE: LLM GENERATION SKIPPED[/bold yellow]")
+                print("=" * 80)
+
+                print("\n📝 FULL ASSEMBLED PROMPT SENT TO LLM:")
+                # Display the full prompt using rich.print for readability
+                rich.print(f"[green]{res['final_prompt']}[/green]")
+
+                print("\n📚 SOURCES USED FOR CONTEXT:")
+                unique_sources = set(res["sources"])
+                if unique_sources:
+                    for src in unique_sources:
+                        console.print(f"- [yellow]{os.path.basename(src)}[/yellow]")
+
+                print("\n🔍 CONTEXT CHUNKS (Top Re-Ranked):")
+                for i, chunk in enumerate(res["context_chunks"]):
+                    # Determine source for display clarity
+                    source_name = os.path.basename(res['sources'][i]) if res['sources'] and i < len(
+                        res['sources']) else 'Unknown'
+                    console.print(f"--- Chunk {i + 1} (Source: [cyan]{source_name}[/cyan]) ---")
+                    console.print(chunk)
+
+                print("\n" + "--------------------------------------------------")
+                console.print(
+                    f"To run the final LLM generation, remove the [bold yellow]'--debug-prompt'[/bold yellow] flag.")
+                return  # Exit successfully after showing prompt
+
+            # --- NORMAL RAG OUTPUT ---
 
             # Display formatted output
             print("\n" + "=" * 50)

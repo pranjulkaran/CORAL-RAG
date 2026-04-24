@@ -38,10 +38,9 @@ class AgenticRAG:
         """
         hyde_prompt = (
             "You are an expert researcher. Based on the following user query, "
-            "write a detailed, hypothetical answer (about 3-4 sentences). "
+            "write a detailed, hypothetical answer (about 1-2sentences). "
             "DO NOT use external knowledge; fabricate a highly plausible response "
             "that captures the semantic complexity of the query. "
-            "Do not include any source citations."
         )
 
         messages = [
@@ -53,7 +52,11 @@ class AgenticRAG:
             response = ollama.chat(
                 model=self.model,
                 messages=messages,
-                options={"temperature": 0.7, "num_ctx": 8000, "num_predict": 8000}
+                options={
+                    "temperature": 0.7,
+                    "num_predict": 256,
+                    "num_ctx": 4000
+                }
             )
             return response["message"]["content"]
         except Exception as e:
@@ -87,13 +90,13 @@ class AgenticRAG:
         This is an async method because it calls the asynchronous embedder.
         """
 
-        # --- HyDE Step (New) ---
+        # --- HyDE Step ---
         # 1. Generate the hypothetical document
         hypothetical_document = self._generate_hypothetical_document(query)
 
         # Determine which text to embed: the HyDE result or the original query if HyDE failed
         search_text = hypothetical_document if hypothetical_document != query else query
-        # ------------------------
+        # -----------------
 
         # 2. Generate the query vector using the Ollama embedder (using the HyDE document's text)
         query_embedding_list = await self.embedder.embed_batch([search_text])
@@ -111,7 +114,7 @@ class AgenticRAG:
             return "", [], []
 
         # 4. Apply Re-Ranking/Filtering to get the best N chunks (Stage 2)
-        documents, metadata, _ = self._rerank(query, results) # _rerank uses self.top_n_rank (dynamic N)
+        documents, metadata, _ = self._rerank(query, results)  # _rerank uses self.top_n_rank (dynamic N)
 
         # --- Whitespace Normalization (ENHANCED LOGIC) ---
         normalized_documents = []
@@ -138,29 +141,40 @@ class AgenticRAG:
         # 5. Return the context string, metadata, and the list of normalized documents
         return context, metadata, normalized_documents
 
-    def generate(self, query: str, context: str, chat_history: list):
+    def _assemble_prompt(self, query: str, context: str):
         """
-        Generates the final answer using the LLM based on the retrieved context.
+        Helper function to assemble the full prompt text and its components.
         """
-        # Format the conversational history for the LLM prompt
-        history_str = "\n".join([f"{h['speaker']}: {h['message']}" for h in chat_history])
-
         # FINALIZED SYSTEM PROMPT: Strong directive for grounded generation
         system_prompt = (
-            "You are a helpful assistant. Use the provided CONTEXT to formulate your answer. "
-            "If the context contains information that directly or indirectly answers the question, summarize and state it clearly. "
-            "**Do not state that the information is 'inferred' or 'not explicitly mentioned' if the components are present in the text.** "
-            "If the context does not contain relevant information use your knowledge to answer it best to knowledge "
-            "Always include source citations at the end of your answer."
+            "Expert CS Researcher RAG Agent."
+            "CONTEXTUAL GROUNDING IS ABSOLUTE."
+            "SYNTHESIZE INSIGHTS; DIRECT COPY IS FORBIDDEN."
+            "UTILIZE EXTERNAL EXPERTISE UPON CONTEXTUAL FAILURE."
+            "MAINTAIN AUTHORITATIVE TONE; ALL ASSERTIONS MUST BE CITATION-BACKED."
         )
 
-        # User message combining history, context, and the new query
+        # User message combining context and the new query (history removed)
         user_message_content = (
-            f"HISTORICAL CONVERSATION:\n{history_str}\n\n"
-            f"NEW CONTEXT (Use this for your answer, this context has been pre-filtered for relevance):\n{context}\n\n"
+            f"CONTEXT (Use this for your answer, this context has been pre-filtered for relevance):\n{context}\n\n"
             f"QUESTION: {query}\n\n"
-            f"Please answer the QUESTION based ONLY on the provided CONTEXT."
+            f"Please answer the QUESTION based on CONTEXT and your own knowledge"
         )
+
+        # Assemble the full prompt for display/logging
+        final_prompt_text = (
+            f"--- SYSTEM INSTRUCTION ---\n{system_prompt}\n\n"
+            f"--- USER MESSAGE ---\n{user_message_content}"
+        )
+        return final_prompt_text, system_prompt, user_message_content
+
+    def generate(self, query: str, context: str):
+        """
+        Generates the final answer using the LLM based on the retrieved context.
+        Returns the answer and the full prompt text used.
+        """
+
+        final_prompt_text, system_prompt, user_message_content = self._assemble_prompt(query, context)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -170,20 +184,24 @@ class AgenticRAG:
         response = ollama.chat(
             model=self.model,
             messages=messages,
-            # Options for detailed and long response
-            options={"temperature": 0.7, "num_ctx": 8000, "num_predict": 8000}
+            options={
+                "temperature": 0.7,
+                "num_predict": 4000,
+                "num_ctx": 4000
+            }
         )
 
-        return response["message"]["content"]
+        return response["message"]["content"], final_prompt_text
 
-    def query(self, question: str, chat_history: list = None, top_k: int = None, top_n: int = None):
+    def query(self, question: str, top_k: int = None, top_n: int = None, debug_prompt_only: bool = False):
         """
-        The main synchronous entry point for the query process, now accepting dynamic parameters.
-        """
-        chat_history = chat_history if chat_history is not None else []
+        The main synchronous entry point for the query process.
 
-        # --- Dynamic Parameter Update (Accepting Streamlit values) ---
-        # Override instance parameters if they are passed from the Streamlit UI
+        If debug_prompt_only is True, it returns the assembled prompt text and context
+        chunks, skipping the final LLM generation call.
+        """
+
+        # --- Dynamic Parameter Update ---
         if top_k is not None:
             self.top_k_retrieve = top_k
         if top_n is not None:
@@ -197,18 +215,43 @@ class AgenticRAG:
         except Exception as e:
             # Handle retrieval errors gracefully
             print(f"Error during async retrieval: {e}")
-            return {"answer": f"An unexpected error occurred during context retrieval: {e}", "sources": [],
-                    "context_chunks": []}
+            return {"answer": f"An unexpected error occurred during context retrieval: {e}",
+                    "sources": [],
+                    "context_chunks": [],
+                    "final_prompt": "Retrieval failed before prompt assembly."}
 
         if not context:
+            # Assemble a fallback prompt even if context is empty
+            final_prompt, _, _ = self._assemble_prompt(question, "No relevant context found in the database.")
             return {"answer": "I could not find any relevant documents in the database to answer your question.",
-                    "sources": [], "context_chunks": []}
+                    "sources": [],
+                    "context_chunks": [],
+                    "raw_context_text": "",
+                    "final_prompt": final_prompt}
 
-        # Generate the final answer
-        answer = self.generate(question, context, chat_history)
+        # Assemble the full prompt text immediately after context retrieval
+        final_prompt, _, _ = self._assemble_prompt(question, context)
+
+        # --- DEBUG MODE STOP ---
+        if debug_prompt_only:
+            # The documents list here contains the final, re-ranked and normalized chunks
+            return {"final_prompt": final_prompt,
+                    "context_chunks": documents,
+                    "raw_context_text": context,
+                    "sources": list(set(md.get("source", "Unknown Source") for md in metadata)),
+                    "answer": "DEBUG MODE: Final LLM generation step skipped."}
+        # -----------------------
+
+        # NORMAL MODE: Generate the final answer and capture the full prompt text
+        answer, _ = self.generate(question, context)
 
         # Extract unique source names (file paths)
         unique_sources = list(set(md.get("source", "Unknown Source") for md in metadata))
 
         # The documents list here only contains the final, re-ranked and normalized chunks
-        return {"answer": answer, "sources": unique_sources, "context_chunks": documents, "raw_context_text": context}
+        return {"answer": answer,
+                "sources": unique_sources,
+                "context_chunks": documents,
+                "raw_context_text": context,
+                "final_prompt": final_prompt
+                }
